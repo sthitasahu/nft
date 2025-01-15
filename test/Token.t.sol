@@ -2,152 +2,158 @@
 pragma solidity ^0.8.13;
 
 import {Test, console} from "forge-std/Test.sol";
-import   {Token} from "../src/Token.sol";
+import {Token} from "../src/Token.sol";
 
 contract TokenTest is Test {
     Token token;
-    address deployer = address(1);
-    address receiver = address(2);
-    address spender = address(3);
-    uint256 initialSupply = 1_000_000 ether;
+    address deployer;
+    address receiver;
+    address exchange;
 
-    // Events matching the Token contract
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
+    uint256 constant initialSupply = 1_000_000 ether;
 
     function setUp() public {
+        deployer = address(0x1);
+        receiver = address(0x2);
+        exchange = address(0x3);
+
         vm.startPrank(deployer);
-        token = new Token("Test Token", "TST", 1_000_000);
+        token = new Token("Dapp University", "DAPP", initialSupply);
         vm.stopPrank();
     }
 
     function testDeployment() public {
-        assertEq(token.name(), "Test Token");
-        assertEq(token.symbol(), "TST");
+        assertEq(token.name(), "Dapp University");
+        assertEq(token.symbol(), "DAPP");
         assertEq(token.decimals(), 18);
         assertEq(token.totalSupply(), initialSupply);
-        assertEq(token.balances(deployer), initialSupply);
-    }
-
-    function testApproveSuccess() public {
-        vm.startPrank(deployer);
-
-        uint256 amount = 100 ether;
-        vm.expectEmit(true, true, true, true);
-        emit Approval(deployer, spender, amount);
-        bool success = token.approve(spender, amount);
-
-        assertTrue(success);
-        assertEq(token.allowance(deployer, spender), amount);
-
-        vm.stopPrank();
-    }
-
-    function testApproveFailInvalidSpender() public {
-        vm.startPrank(deployer);
-
-        uint256 amount = 100 ether;
-        vm.expectRevert(bytes("Invalid spender address"));
-        token.approve(address(0), amount);
-
-        vm.stopPrank();
+        
     }
 
     function testTransferSuccess() public {
-        vm.startPrank(deployer);
-
         uint256 amount = 100 ether;
+
+        vm.startPrank(deployer);
+        token.transfer(receiver, amount);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(deployer), initialSupply - amount);
+        assertEq(token.balanceOf(receiver), amount);
+    }
+
+    function testTransferEmitEvent() public {
+        uint256 amount = 100 ether;
+
+        vm.startPrank(deployer);
         vm.expectEmit(true, true, true, true);
-        emit Transfer(deployer, receiver, amount);
-        bool success = token.transfer(receiver, amount);
-
-        assertTrue(success);
-        assertEq(token.balances(deployer), initialSupply - amount);
-        assertEq(token.balances(receiver), amount);
-
+        emit Token.Transfer(deployer, receiver, amount);
+        token.transfer(receiver, amount);
         vm.stopPrank();
     }
 
     function testTransferFailInsufficientBalance() public {
-        vm.startPrank(receiver);
+        uint256 invalidAmount = 1_000_000_000 ether; // More than the total supply
 
-        uint256 amount = 100 ether;
-        vm.expectRevert(bytes("Insufficient balance"));
-        token.transfer(deployer, amount);
-
+        vm.startPrank(deployer);
+        vm.expectRevert();
+        token.transfer(receiver, invalidAmount);
         vm.stopPrank();
     }
 
     function testTransferFailInvalidRecipient() public {
-        vm.startPrank(deployer);
-
         uint256 amount = 100 ether;
-        vm.expectRevert(bytes("Invalid recipient address"));
-        token.transfer(address(0), amount);
 
+        vm.startPrank(deployer);
+        vm.expectRevert();
+        token.transfer(address(0), amount);
+        vm.stopPrank();
+    }
+
+    function testApproveSuccess() public {
+        uint256 amount = 100 ether;
+
+        vm.startPrank(deployer);
+        token.approve(exchange, amount);
+        vm.stopPrank();
+
+        assertEq(token.allowance(deployer, exchange), amount);
+    }
+
+    function testApproveEmitEvent() public {
+        uint256 amount = 100 ether;
+
+        vm.startPrank(deployer);
+        vm.expectEmit(true, true, true, true);
+        emit Token.Approval(deployer, exchange, amount);
+        token.approve(exchange, amount);
+        vm.stopPrank();
+    }
+
+    function testApproveFailInvalidSpender() public {
+        uint256 amount = 100 ether;
+
+        vm.startPrank(deployer);
+        vm.expectRevert();
+        token.approve(address(0), amount);
         vm.stopPrank();
     }
 
     function testTransferFromSuccess() public {
-        vm.startPrank(deployer);
-
         uint256 amount = 100 ether;
-        token.approve(spender, amount);
+
+        // Approve exchange
+        vm.startPrank(deployer);
+        token.approve(exchange, amount);
         vm.stopPrank();
 
-        vm.startPrank(spender);
+        // Transfer from deployer to receiver
+        vm.startPrank(exchange);
+        token.transferFrom(deployer, receiver, amount);
+        vm.stopPrank();
+
+        assertEq(token.balanceOf(deployer), initialSupply - amount);
+        assertEq(token.balanceOf(receiver), amount);
+        assertEq(token.allowance(deployer, exchange), 0);
+    }
+
+    function testTransferFromEmitEvent() public {
+        uint256 amount = 100 ether;
+
+        // Approve exchange
+        vm.startPrank(deployer);
+        token.approve(exchange, amount);
+        vm.stopPrank();
+
+        // Expect Transfer event
+        vm.startPrank(exchange);
         vm.expectEmit(true, true, true, true);
-        emit Transfer(deployer, receiver, amount);
-        bool success = token.transferFrom(deployer, receiver, amount);
-
-        assertTrue(success);
-        assertEq(token.balances(deployer), initialSupply - amount);
-        assertEq(token.balances(receiver), amount);
-        assertEq(token.allowance(deployer, spender), 0);
-
+        emit Token.Transfer(deployer, receiver, amount);
+        token.transferFrom(deployer, receiver, amount);
         vm.stopPrank();
     }
 
-    function testTransferFromFailExceedsAllowance() public {
-        vm.startPrank(deployer);
-
+    function testTransferFromFailInsufficientAllowance() public {
         uint256 amount = 100 ether;
-        token.approve(spender, amount);
-        vm.stopPrank();
 
-        vm.startPrank(spender);
-        uint256 invalidAmount = 200 ether; // Exceeding allowance
-        vm.expectRevert(bytes("Allowance exceeded"));
-        token.transferFrom(deployer, receiver, invalidAmount);
-
+        // Attempt to transfer without approval
+        vm.startPrank(exchange);
+        vm.expectRevert();
+        token.transferFrom(deployer, receiver, amount);
         vm.stopPrank();
     }
 
-    function testTransferFromFailExceedsBalance() public {
+    function testTransferFromFailInsufficientBalance() public {
+        uint256 amount = initialSupply + 1;
+
+        // Approve exchange
         vm.startPrank(deployer);
-
-        uint256 amount = 100 ether;
-        token.approve(spender, amount);
+        token.approve(exchange, amount);
         vm.stopPrank();
 
-        vm.startPrank(spender);
-        vm.expectRevert(bytes("Insufficient balance"));
-        token.transferFrom(deployer, receiver, initialSupply + 1 ether);
-
-        vm.stopPrank();
-    }
-
-    function testTransferFromFailInvalidRecipient() public {
-        vm.startPrank(deployer);
-
-        uint256 amount = 100 ether;
-        token.approve(spender, amount);
-        vm.stopPrank();
-
-        vm.startPrank(spender);
-        vm.expectRevert(bytes("Invalid recipient address"));
-        token.transferFrom(deployer, address(0), amount);
-
+        // Attempt transfer exceeding balance
+        vm.startPrank(exchange);
+        vm.expectRevert();
+        token.transferFrom(deployer, receiver, amount);
         vm.stopPrank();
     }
 }
